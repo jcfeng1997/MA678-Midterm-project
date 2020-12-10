@@ -1,0 +1,434 @@
+---
+title: "MA678 Midterm Project"
+author: "Jiachen Feng"
+date: "2020/11/30"
+output: pdf_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(ggplot2, tidyr, plyr, dplyr, tm, SnowballC, RColorBrewer, ggmap, lme4, knitr,stringr,RColorBrewer,performance,rstanarm,bayesplot,sjPlot,hexbin)
+```
+
+# 1.Abstract
+
+Nowadays, more and more people regard games as a way of leisure, and the profits of the game industry are huge. What I want to answer is what factors are the key to the success of a game. My project has been taking measurements as cost, required storage space and more, but it's unknown how they affect games' success or not. I built a multilevel model and a linear model to assess how these measurements correlate with games' success. The results found that there are indeed many factors that contribute to the success of a game. This project also brings me some inspiration on how to explore further in the future.
+
+# 2.Introduction
+
+## 2.1 Background
+
+A PC game, also known as a computer game or personal computer game, is a type of video game played on a personal computer rather than a video game console or arcade machine. **Newzoo**(a leading global provider of games and esports analytics) reports that the PC gaming sector is the third-largest category across all platforms as of 2016, with the console sector second-largest, and mobile / smartphone gaming sector biggest. In 2018, the global PC games market was valued at about $27.7 billion.[^1]
+
+
+[^1]:Reference:Wikipedia. Here's the weblink:[*PC game*](https://en.wikipedia.org/wiki/PC_game).
+
+## 2.2 Question
+
+PC game developers may be interested in what kind of games are worthy developed due to the huge interests of PC games market. There may be many decisive factors behind a successful game. PC games' genre can affect the audience, because some players prefer action games and some players show more interest in strategy game. In addition, the minimum graphics hardware requirements can affect popularity. A game that requires high graphics hardware may not be a popular game, because most people's graphics hardware cannot meet its requirements. 
+Another question is how to evaluate a game. Can we say a game is more successful because there are more active players playing it? Here I chose two measurements to measure a game. One is reputation, which can reflect the quality, and one is topicality, which can reflect the popularity. In the dataset I found, metacritic rating gives a score of a PC game, presence gives a total number of social media articles. By using these two measurements, we can make a rough judgment on the success of a game.
+
+# 2.3 Model
+
+The initial data is very messy and contains a lot of useless data. After data cleaning, I kept 2607 observations and used these sub samples for analysis. 
+
+According to the question, I have two outcomes, they are metacritic rating and presence. Considering the outcome type, a linear regression model and a multilevel regression model are used. For the multilevel model, I chose to use *rstanarm* package rather than *lme4* package.
+
+
+# 3.Method
+
+## 3.1 Data Source
+
+I got the dataset from kaggle. Here's the weblink:[*Dataset*](https://www.kaggle.com/jesneuman/pc-games). The dataset contains many details about PC games' features. Here are some data descriptions:
+
+* Name: Original Title.
+
+* Metacritic: Games metacritic rating.
+
+* Indie: Whether or not the game was created by indie developers.
+
+* Presence: Number of posts on social media sights.(e.g. Reddit.)
+
+* OriginalCost: How much in USD the game cost at release.
+
+* Storage: How much storage space is required to download the game.
+
+* Memory: How much memory is required to support the game.
+
+* Controller: Whether or not the game can be played with a controller.
+
+* Achievements: How many achievements can be earned in game.
+
+Before I start exploring, the initial dataset obtained from kaggle is very messy, therefore a in-depth data cleaning is needed to be done.
+
+```{r,echo=FALSE , message=FALSE, warning=FALSE}
+#previous work
+##read the data and cleaning
+pc <- read.csv("games.csv",sep = ",") %>% 
+  select(c(3,6,8,9,12,13,18,21,24))  
+###overall dataset
+pc[pc==""] <- NA 
+pc <- na.omit(pc) %>% 
+  filter(Indie==0|Indie==1)
+
+###OriginalCost
+pc$OriginalCost <- substr(pc$OriginalCost,2,6) %>% 
+  as.numeric()
+pc$OriginalCost[is.na(pc$OriginalCost)] <- 0
+
+###StorageGB
+pc$number <- str_extract(pc$Storage,"[0-9]+") %>% 
+  as.numeric()
+pc$unit1 <- str_extract(pc$Storage,"[GB]+")
+pc <- mutate(pc,StorageGB=if_else(pc$unit1=="B",pc$number/1024,pc$number))
+
+###Memory
+pc$Memory <- substr(pc$Memory,1,8)
+pc$memory <- str_extract(pc$Memory,"[0-9]+") %>% 
+  as.numeric()
+pc$unit2 <- str_extract(pc$Memory,"[GB]+")
+pc <- mutate(pc,MemoryGB=if_else(pc$unit2=="B",pc$memory/1024,pc$memory))
+pc$MemoryGB <- as.character(pc$MemoryGB)
+pc$MemoryGB <- str_c(pc$MemoryGB,"GB RAM",sep = " ")
+
+###Select columns
+pc <- select(pc,-c(5,6,10,11,13,14))
+
+###asnumeric
+pc[,2:8] <- lapply(pc[,2:8],as.numeric)
+  
+```
+
+
+## 3.2 Model used
+### 3.2.1 Metacritic Rating
+Metacritic Rating is an important indicator used to evaluate the quality of a game. Therefore, I chose it as the outcome.
+
+#### Model 1
+
+The first model is a linear model. Here I set **Memory** in my regression as a factor, to see how much it can influence the outcome. 
+According to the R output, coefficients of factor **Memory** are small, most of them even less than 1. Therefore, I considered factor **Memory** as a random effect.
+
+#### Model 2
+
+The second model is a multilevel model. Based on the results of model 1, I set **Memory** as random.
+
+### 3.2.2 Presence
+Presence is an important indicator used to evaluate the topicality of a game. Therefore, I chose it as the outcome.
+
+#### Model 3
+This model is a linear model. Here I set **Memory** in my regression as a factor as well.
+According to the R output, coefficients of factor **Memory** are large. Therefore, I considered factor **Memory** as a meaningful factor that can affect the outcome.
+
+#### Model 4
+This model is a multilevel model. Here I set **Memory** in my regression as a factor and treat a between-group variable as a random effect.
+
+#### Model 5
+Through model check, I realized model4 suffers from some flaws, so I added an extra model. Because of the polarization of data, I divided all the games into three small groups, one with presence between 0 and 10000, one with presence between 10000 and 900000, and one with presence greater than 900000, so that I can fit models for these three groups separately.
+Here I used multilevel model.
+
+## 3.3 Model check
+There are a lot of plots in this part, so I put them in the appendix.
+
+### 3.3.1 Residuals
+I checked residuals of these four models. First, I drew the overall residuals, and then I used the *plot_model* function in the *sjPlot* package to check linear relationship between each predictor and residuals.
+
+### 3.3.2 Random effects
+For these two multilevel models, I used the *ranef* function to show the model's random effects. In addition, I used the *plot_model* function in the *sjPlot* package to check the significance of them by these plots.
+
+### 3.3.3 Predictive check
+Then I did predictive check using the *pp_check* function.
+
+### 3.3.4 R-squared value
+At last, for these Stan-models, I checked R-Squared value using the *bayes_R2* function. And I drew histograms to observe the frequency of R square distribution.
+
+# 4.Result
+## Metacritic Rating
+Model1 and model2 are built to explore the quality of PC games, so I put them together to discuss.
+
+First, I checked the results of model check. The overall residuals are distributed within an acceptable range. ACcording to the plot drew by *sjPlot* package, when the predictors' value is relatively large, the residual always increases a lot. In my opinion, this is caused by the large number of small predictors' value, which is a normal phenomenon. Random effects in model2 are reasonable. Most of the intervals contain 0, but some intervals do not. Combining the result of the R-squared value check, which is the value of model 1 is greater than the value of model 2, I concluded that model1 outperforms model2. I attribute this partly to the fact that memory is indeed a factor that affects game ratings, not just a random factor.
+
+According to the output of model1, 
+
+* The coefficients for memory of 2GBRAM,4GBRAM, and 8GBRAM are all negative, which implies that games with large memory requirements may have lower ratings.
+* The coefficient of *Achievement* and *OriginalCost* is extremely small, and their impact on game ratings can be almost ignored. 
+* The coefficient of *Controller* is -1.6, implies that a game that can be played with a controller tends to be 1.6 ratings lower than a game that can not. 
+* The coefficient of *Indie* is 0.7, implies that a game created by indie developers tends to have a 0.7 higher rating than a game created by multiple developers.
+* The coefficient of *StorageGB* is 0.1, implies that with every 1 GB increase in storage, the rating would increase by 0.1. In other words, a game that takes up a lot of memory tends to have a higher rating. This result seems to be intuitive, because games that take up more memory are generally of higher quality.
+
+## Presence
+
+Model3, model4 and model5 are built to explore the topicality of PC games, so I put them together to discuss.
+
+Identically, I checked the results of model check of model3 and model4 first. Similarly, residuals and random effects are good. However, the predictive check plot is not good, which means the model doesn't fit very well. After checking the data, I attributed this phenomenon to the polarization of the original data. A game is either very popular and highly topical, or only a few people discuss it. There are two obvious clusters gathered near 0 and 1000000, and also some games with presences between 0 and 1000000 exist. The number of these games is large, and cannot be ignored. The solution I came up with is to divide all the games into three groups, one with presence near 0, one with 1,000,000, and one with the other games whose presence has no obvious tendency, so that I can fit models for these three groups separately.
+
+Based on the above reasons, I got model5 as my ultimate model analyzing presence. After model check, residuals and predictive check plot improve a lot compared with model4.
+
+According to the output of model5, 
+
+* The coefficients of *OriginalCost* are all negative, implies that expensive games tend to be less discussed. 
+* For those games with a low presence, the *Controller* coefficient 21.4 means a positive impact on presence. Controller can be an interesting feature, enticing people to discuss. For those games with a high presence, controller has the opposite effect, for the reason the coefficients are negative.
+* The coefficients of *Achievement* are all positive, implies that games with more achievements tend to be more discussed.
+* For those games with a low presence, the *StorageGB* coefficient -13.9 means a negative impact on presence. For those games with a high presence, storage has the opposite effect, for the reason the coefficients are positive.
+* For those games with a low presence, the *Indie* coefficient 420.2 means a positive impact on presence. Indie games could be a characteristic feature enticing people to discuss. For those games with a high presence, things are opposite. The coefficients are extremely big, which means it has a huge negative effect.
+* The coefficient *Memory* varies greatly from low memory to high memory, and from low presence to high presence. It can be considered as a random factor here, and it does not have much influence on the presence.
+
+
+# 5.Discussion
+## 5.1 Implication
+
+The predictors in the dataset do have an impact on PC games' quality and topicality. The details on how to influence, positive or negative are mentioned in the Result part.
+
+## 5.2 Limitation
+
+* The dataset lacks necessary features of the games to get better fitting model. For example, the age group of players. According to people’s intuition, young players seldom comment online.
+* There should be a certain method when grouping data for model5.
+
+## 5.3 Future Directions
+
+According to the limitations, the model can be improved in two directions:
+
+* Accessing steam developer wiki through an API to get more information about PC games.
+* Learning more about grouping data. Some methods about handling atypical data types are also needed.
+
+# 6.Appendix
+## 6.1 Data overview
+
+At first, I checked the data structure after cleaning. This step helps me fit a suitable model. Then I proceeded a summary of the dataset to acquire a preliminary understanding of the data types.
+
+```{r, echo=FALSE}
+str(pc)
+summary(pc)
+```
+## 6.2 Exploration Data Analysis
+
+### 6.2.1 Metacritic Rating
+
+Metacritic Rating is an important indicator used to evaluate the quality of a game. During this part, I drew a plot to display the distribution of overall ratings. In addition, a normal density curve is attached.
+
+
+```{r,echo=FALSE, warning=FALSE}
+fig_1 <- hist(pc$Metacritic,breaks = 12,col =brewer.pal(12,"Spectral"),xlab = "PC Games' Metacritic Rating",main = "Frequency distribution of game ratings")
+xfit <- seq(min(pc$Metacritic),max(pc$Metacritic),length.out = 100)
+yfit <- dnorm(xfit,mean = mean(pc$Metacritic),sd=sd(pc$Metacritic)) 
+yfit <- yfit*diff(fig_1$mids[1:2])*length(pc$Metacritic)
+lines(xfit,yfit,col="black",lwd=1)
+box()
+  
+```
+
+### 6.2.2 Memory Requirement
+
+Random-access memory is a form of computer memory that can be read and changed in any order, typically used to store working data and machine code. Generally, a game will have a minimum memory requirement. For many large games, these requirements will generally be 4GB RAM, 8GB RAM, etc. In addition, some games require very little memory, but these games account for a small proportion of all games. In order to see the proportion of each memory requirement type clearly, here I drew a pie chart of memory requirements. Among them, I classified those types of memory requirements that appear very infrequently into one category, which is **Other Memory Types**.
+
+```{r,echo=FALSE, warning=FALSE}
+table <- table(pc$MemoryGB) %>% 
+  data.frame()
+table1 <- filter(table,Freq>100)
+table2 <- filter(table,Freq<=100)
+table1 <- add_row(table1,Var1="Other Memory Types",Freq=sum(table2$Freq))
+pct <- round(table1$Freq/sum(table1$Freq)*100)
+label1 <- paste(table1$Var1," ",pct,"%",sep = "")
+pie(table1$Freq,labels = label1,col =brewer.pal(length(table1$Var1),"Pastel1"),main = "Memory requirements percentage pie chart")
+
+```
+
+### 6.2.3 Cost and Presence
+
+In this dataset, **Presence** gives the number of posts on social media sights.(e.g. Reddit.) It is a measure of topicality. **OriginalCost** gives how much in USD the game cost at release. Based on our experience, games that cost less may be more topical, because it’s more likely that more people will play a game that costs less. During this part, I drew a scatterplot to see if there is such a trend.
+
+
+```{r,echo=FALSE, warning=FALSE}
+options(scipen = 20)
+pc_plot1 <- filter(pc,OriginalCost<=100)
+plot(pc_plot1$OriginalCost,pc_plot1$Presence,xlab="Original Cost(dollars)",ylab="Number of posts on social media sights" ,main="Scatterplot of Cost and Presence", col=rgb(0,50,0,50,maxColorValue=255), pch=16)
+
+
+```
+According to the scatterplot, we can see that in the cost range of 10 dollars to 30 dollars, points with low topicality are more dense, which means that our guess may be correct.
+
+## 6.3 Stan mean_PPD Check
+
+I used stan's built-in function mean_PPD diagnostic as a quick diagnostic.
+
+```{r, echo=FALSE}
+#subdividing
+subdat1 <- filter(pc,pc$Presence<=10000)
+subdat2 <- filter(pc,pc$Presence>10000&pc$Presence<=900000)
+subdat3 <- filter(pc,pc$Presence>900000)
+
+mean(pc$Metacritic)
+mean(pc$Presence)
+mean(subdat1$Presence)
+mean(subdat2$Presence)
+mean(subdat3$Presence)
+```
+
+## 6.4 Model Output
+
+### Model 1
+
+```{r, echo=FALSE, warning=FALSE}
+
+fit_1 <- stan_glm(Metacritic~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB),data = pc)
+summary(fit_1)
+
+```
+### Model 2
+```{r, echo=FALSE,  warning=FALSE}
+
+fit_2 <- stan_lmer(Metacritic~OriginalCost+Controller+Achievements+StorageGB+Indie+(1|MemoryGB),data = pc,REML = FALSE)
+summary(fit_2)
+
+```
+### Model 3
+
+```{r, echo=FALSE, warning=FALSE}
+fit_3 <- stan_glm(Presence~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB),data = pc)
+summary(fit_3)
+
+```
+
+### Model 4
+```{r, echo=FALSE, warning=FALSE}
+fit_4 <- stan_lmer(Presence~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB)+(1+StorageGB|MemoryGB),data = pc)
+summary(fit_4)
+
+```
+
+### Model 5
+
+```{r, echo=FALSE, warning=FALSE}
+#subdividing
+subdat1 <- filter(pc,pc$Presence<=10000)
+subdat2 <- filter(pc,pc$Presence>10000&pc$Presence<=900000)
+subdat3 <- filter(pc,pc$Presence>900000)
+
+#fit multilevel model
+fit_5 <- stan_lmer(Presence~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB)+(1+StorageGB|MemoryGB),data = subdat1)
+summary(fit_5)
+
+fit_6 <- stan_lmer(Presence~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB)+(1+StorageGB|MemoryGB),data = subdat2)
+summary(fit_6)
+
+fit_7 <- stan_lmer(Presence~OriginalCost+Controller+Achievements+StorageGB+Indie+factor(MemoryGB)+(1+StorageGB|MemoryGB),data = subdat3)
+summary(fit_7)
+
+```
+## 6.5 Model Check
+
+### 6.5.1 Residuals
+```{r, echo=FALSE, warning=FALSE}
+resid_1 <- resid(fit_1) 
+plot(c(1:length(resid_1)),resid_1,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 1",pch=20)
+abline(h=0)
+
+plot_model(fit_1, type = "resid", show.values = TRUE)
+
+resid_2 <- resid(fit_2) 
+plot(c(1:length(resid_2)),resid_2,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 2",pch=20)
+abline(h=0)
+
+plot_model(fit_2, type = "resid", show.values = TRUE)
+
+resid_3 <- resid(fit_3) 
+plot(c(1:length(resid_3)),resid_3,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 3",pch=20)
+abline(h=0)
+
+plot_model(fit_3, type = "resid", show.values = TRUE)
+
+resid_4 <- resid(fit_4) 
+plot(c(1:length(resid_4)),resid_4,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 4",pch=20)
+abline(h=0)
+
+plot_model(fit_4, type = "resid", show.values = TRUE)
+
+resid_5 <- resid(fit_5) 
+plot(c(1:length(resid_5)),resid_5,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 5",pch=20)
+abline(h=0)
+
+plot_model(fit_5, type = "resid", show.values = TRUE)
+
+resid_6 <- resid(fit_6) 
+plot(c(1:length(resid_6)),resid_6,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 5",pch=20)
+abline(h=0)
+
+plot_model(fit_6, type = "resid", show.values = TRUE)
+
+resid_7 <- resid(fit_7) 
+plot(c(1:length(resid_7)),resid_7,xlab = "Number",ylab = "Residuals",main = "Residuals for Model 5",pch=20)
+abline(h=0)
+
+plot_model(fit_7, type = "resid", show.values = TRUE)
+```
+
+### 6.5.2 Random Effects
+```{r, echo=FALSE, warning=FALSE}
+ranef(fit_2)
+plot_model(fit_2, type = "re", show.values = TRUE)
+
+ranef(fit_4)
+plot_model(fit_4, type = "re", show.values = TRUE)
+
+ranef(fit_5)
+plot_model(fit_5, type = "re", show.values = TRUE)
+
+ranef(fit_6)
+plot_model(fit_6, type = "re", show.values = TRUE)
+
+ranef(fit_7)
+plot_model(fit_7, type = "re", show.values = TRUE)
+
+```
+### 6.5.3 Predictive Check
+```{r, echo=FALSE, warning=FALSE}
+
+pp_check(fit_1,check_range = T)
+pp_check(fit_2,check_range = T)
+pp_check(fit_3,check_range = T)
+pp_check(fit_4,check_range = T)
+pp_check(fit_5,check_range = T)
+pp_check(fit_6,check_range = T)
+pp_check(fit_7,check_range = T)
+
+```
+
+### 6.5.4 R-squared value
+```{r, echo=FALSE,  warning=FALSE}
+rsq1 <- bayes_R2(fit_1)
+print(median(rsq1))
+hist(rsq1)
+
+rsq2 <- bayes_R2(fit_2)
+print(median(rsq2))
+hist(rsq2)
+
+rsq3 <- bayes_R2(fit_3)
+print(median(rsq3))
+hist(rsq3)
+
+rsq4 <- bayes_R2(fit_4)
+print(median(rsq4))
+hist(rsq4)
+
+rsq5 <- bayes_R2(fit_5)
+print(median(rsq5))
+hist(rsq5)
+
+rsq6 <- bayes_R2(fit_6)
+print(median(rsq6))
+hist(rsq6)
+
+rsq7 <- bayes_R2(fit_7)
+print(median(rsq7))
+hist(rsq7)
+```
+
+# 7.Bibliography
+
+Data source: kaggle from Internet. Weblink: https://www.kaggle.com/jesneuman/pc-games.
+
+R package: ggplot2, tidyr, plyr, dplyr, RColorBrewer, ggmap, knitr, stringr, RColorBrewer, performance, rstanarm, bayesplot, sjPlot.
+
+
